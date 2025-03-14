@@ -84,6 +84,10 @@ def parse_options_data(call_df, put_df, ticker):
     total_put_volume = put_df["Volume"].sum()
     put_call_ratio = total_put_volume / total_call_volume if total_call_volume > 0 else float('inf')
 
+    # 가장 높은 거래량을 가진 옵션 찾기
+    most_traded_call_strike = call_df.loc[call_df["Volume"].idxmax(), "Strike"]
+    most_traded_put_strike = put_df.loc[put_df["Volume"].idxmax(), "Strike"]
+
     # 예상 Target Price 계산
     avg_strike = (call_df["Strike"].mean() + put_df["Strike"].mean()) / 2
     atm_strike = call_df.loc[(call_df["Strike"] - current_price).abs().idxmin(), "Strike"]
@@ -120,7 +124,9 @@ def parse_options_data(call_df, put_df, ticker):
     📅 만기일: {expiry_date}
     🎯 예상 Target Price: ${min_target_price:.2f} ~ ${max_target_price:.2f}
     💰 현재 주가: ${current_price}
-
+    🔥 거래량 가장 높은 콜 옵션 가격: ${most_traded_call_strike}
+    🔥 거래량 가장 높은 풋 옵션 가격: ${most_traded_put_strike}
+    🔥 실시간 변동성 지표 {volatility:.2f}
     """
 
     return report_text, ticker
