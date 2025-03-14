@@ -84,11 +84,13 @@ def parse_options_data(call_df, put_df, ticker):
     total_put_volume = put_df["Volume"].sum()
     put_call_ratio = total_put_volume / total_call_volume if total_call_volume > 0 else float('inf')
 
-    # 예상 Target Price 계산 (세 가지 방법의 평균)
+    # 예상 Target Price 계산
     avg_strike = (call_df["Strike"].mean() + put_df["Strike"].mean()) / 2
     atm_strike = call_df.loc[(call_df["Strike"] - current_price).abs().idxmin(), "Strike"]
-    iv_adjusted = current_price + (call_df["Implied Volatility"].mean() / 100 * current_price)
-    target_price = (avg_strike + atm_strike + iv_adjusted) / 3
+    most_liquid_call_strike = call_df.loc[call_df["Open Interest"].idxmax(), "Strike"]
+    most_liquid_put_strike = put_df.loc[put_df["Open Interest"].idxmax(), "Strike"]
+    most_liquid_strike = (most_liquid_call_strike + most_liquid_put_strike) / 2  # 콜/풋 평균 사용
+    target_price = (most_liquid_strike * 0.05 + avg_strike * 0.05 + atm_strike * 0.9)
 
     # 시장 심리 분석 (PCR, 거래량, IV 포함)
     bullish_sentiment = (call_df["Volume"].mean() > put_df["Volume"].mean()) and (put_call_ratio < 1)
@@ -104,14 +106,19 @@ def parse_options_data(call_df, put_df, ticker):
     else:
         strategy = "🔍 중립: 시장 방향성이 뚜렷하지 않으므로 관망 추천."
 
+    volatility = call_df["Implied Volatility"].mean() / 100  # 변동성을 소수로 변환
+    min_target_price = target_price * (1 - volatility * 0.2)  # 조정 계수 추가
+    max_target_price = target_price * (1 + volatility * 0.2)
+
+
     # 보고서 생성
     report_text = f"""
     📌 {ticker} 옵션 데이터 기반 매매 추천 보고서
 
     {strategy}
     📊 Put/Call Ratio: {put_call_ratio:.2f}
-    📅 예상 만기일: {expiry_date}
-    🎯 예상 Target Price: ${target_price:.2f}
+    📅 만기일: {expiry_date}
+    🎯 예상 Target Price: ${min_target_price:.2f} ~ ${max_target_price:.2f}
     💰 현재 주가: ${current_price}
 
     """
