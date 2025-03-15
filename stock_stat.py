@@ -9,7 +9,7 @@ def fetch_options_data(ticker):
     """
     Yahoo Finance에서 특정 티커의 옵션 데이터를 가져오는 함수.
     """
-    url = f"https://finance.yahoo.com/quote/{ticker}/options/"
+    url = f"https://finance.yahoo.com/quote/{ticker}/options/?starddle=true"
     headers = {"User-Agent": "Mozilla/5.0"}
     response = requests.get(url, headers=headers)
 
@@ -67,6 +67,7 @@ def parse_options_data(call_df, put_df, ticker):
         df["Last Price"] = pd.to_numeric(df["Last Price"], errors='coerce').fillna(0)
         df["Open Interest"] = pd.to_numeric(df["Open Interest"].replace("-", "0").astype(str).str.replace(",", ""), errors='coerce').fillna(0)
         df["Bid-Ask Spread"] = abs(df["Ask"] - df["Bid"])
+        df["Change"] = pd.to_numeric(df["Change"], errors='coerce').fillna(0)
 
     # 만기일 가져오기
     expiry_date = extract_expiry_date(call_df.iloc[0]['Contract Name'])
@@ -78,6 +79,8 @@ def parse_options_data(call_df, put_df, ticker):
         current_price = call_df["Strike"].median()
 
     current_price = float(current_price)
+    highest_change_call = call_df.loc[call_df["Change"].idxmax()]
+    highest_change_put = put_df.loc[put_df["Change"].idxmax()]
 
     # Put/Call Ratio 계산
     total_call_volume = call_df["Volume"].sum()
@@ -97,7 +100,7 @@ def parse_options_data(call_df, put_df, ticker):
     target_price = (most_liquid_strike * 0.05 + avg_strike * 0.05 + atm_strike * 0.9)
 
     # 시장 심리 분석 (PCR, 거래량, IV 포함)
-    bullish_sentiment = (call_df["Volume"].mean() > put_df["Volume"].mean()) and (put_call_ratio < 1)
+    bullish_sentiment = (call_df["Volume"].mean() > put_df["Volume"].mean()) and (put_call_ratio < 1) and (highest_change_call["Change"] > highest_change_put["Change"])
     high_iv = call_df["Implied Volatility"].mean() > put_df["Implied Volatility"].mean()
 
     # 매수/매도 추천 전략 도출
