@@ -78,6 +78,20 @@ def get_oi_range(df, threshold=0.85):
     df_filtered = df_sorted[df_sorted["OI_Cumsum"] <= total_oi * threshold]
     return df_filtered["Strike"].min(), df_filtered["Strike"].max()
 
+def get_box_range_weighted(df, current_price, strike_distance_limit=0.25):
+    lower = current_price * (1 - strike_distance_limit)
+    upper = current_price * (1 + strike_distance_limit)
+    df_filtered = df[df["Strike"].between(lower, upper)].copy()
+    
+    if df_filtered.empty:
+        return None
+
+    df_filtered["WeightedScore"] = df_filtered["Open Interest"] * 0.3 + df_filtered["Volume"] * 0.7
+    best_strike = df_filtered.loc[df_filtered["WeightedScore"].idxmax(), "Strike"]
+    
+    return best_strike
+
+
 def parse_options_data(call_df, put_df, ticker):
     if call_df is None or put_df is None:
         return "❌ 유효한 옵션 데이터를 가져오지 못했습니다."
@@ -99,64 +113,106 @@ def parse_options_data(call_df, put_df, ticker):
     if current_price == "N/A":
         current_price = call_df["Strike"].median()
     current_price = float(current_price)
-
     total_call_volume = call_df["Volume"].sum()
     total_put_volume = put_df["Volume"].sum()
     put_call_ratio = total_put_volume / total_call_volume if total_call_volume > 0 else float('inf')
-
     most_traded_call_strike = call_df.loc[call_df["Volume"].idxmax(), "Strike"]
     most_traded_put_strike = put_df.loc[put_df["Volume"].idxmax(), "Strike"]
     most_traded_call_oi = call_df.loc[call_df["Volume"].idxmax(), "Open Interest"]
     most_traded_put_oi = put_df.loc[put_df["Volume"].idxmax(), "Open Interest"]
-
     highest_change_call = call_df.loc[call_df["Change"].idxmax()]
     highest_change_put = put_df.loc[put_df["Change"].idxmax()]
-
-    avg_strike = (call_df["Strike"].mean() + put_df["Strike"].mean()) / 2
-    atm_strike = call_df.loc[(call_df["Strike"] - current_price).abs().idxmin(), "Strike"]
-    target_price = (avg_strike * 0.2 + atm_strike * 0.8)
-
     atm_call_row = call_df.loc[(call_df["Strike"] - current_price).abs().idxmin()]
     atm_put_row = put_df.loc[(put_df["Strike"] - current_price).abs().idxmin()]
     atm_call_iv = atm_call_row["Implied Volatility"]
     atm_put_iv = atm_put_row["Implied Volatility"]
     iv_skew = atm_put_iv - atm_call_iv
-
-    volatility = call_df["Implied Volatility"].mean() / 100
-    min_target_price = target_price * (1 - volatility * 0.2)
-    if min_target_price > current_price:
-        min_target_price = current_price * (1 - volatility * 0.2)
-    max_target_price = target_price * (1 + volatility * 0.2)
     most_traded_call_volume = call_df.loc[call_df["Volume"].idxmax(), "Volume"]
     most_traded_put_volume = put_df.loc[put_df["Volume"].idxmax(), "Volume"]
-
+    
+    bearish_sentiment = (put_df["Volume"].mean() > call_df["Volume"].mean())
     bullish_sentiment = (call_df["Volume"].mean() > put_df["Volume"].mean()) and (put_call_ratio < 1) and (highest_change_call["Change"] > highest_change_put["Change"])
-    high_iv = call_df["Implied Volatility"].mean() > put_df["Implied Volatility"].mean()
-    bearish_sentiment = (most_traded_call_strike < most_traded_put_strike)
-    mean_vix = (call_df["Implied Volatility"].mean() + put_df["Implied Volatility"].mean()) / 2
-
+    
+    mean_iv = (call_df["Implied Volatility"].mean() + put_df["Implied Volatility"].mean()) / 2
+    iv_diff = abs(atm_call_iv - atm_put_iv)
+    if mean_iv > 30 or iv_diff > 5:
+        high_iv = True
+    
     filtered_put_min, _ = get_oi_range(put_df, threshold=0.85)
     _, filtered_call_max = get_oi_range(call_df, threshold=0.85)
     filtered_put_min = max(filtered_put_min, most_traded_put_strike)
     filtered_call_max = min(filtered_call_max, most_traded_call_strike)
 
+    put_box_min = get_box_range_weighted(put_df, current_price, strike_distance_limit=0.3)
+    call_box_max = get_box_range_weighted(call_df, current_price, strike_distance_limit=0.3)
+
+
     strategy = "🔍 중립: 시장 방향성이 뚜렷하지 않음."
     skew_threshold = 2.0
     is_significant_positive_skew = iv_skew > skew_threshold
     is_significant_negative_skew = iv_skew < -skew_threshold
+    
+    # ✅ 신뢰도 지수 계산 ----------------------------
+    today = datetime.datetime.utcnow()
+    expiry_dt = datetime.datetime.strptime(expiry_date, "%Y-%m-%d")
+    days_to_expiry = (expiry_dt - today).days
 
-    if bullish_sentiment and not bearish_sentiment and not high_iv and is_significant_negative_skew:
-        strategy = "🚀 매우 강한 매수 신호: 주식 매수 또는 레버리지 매수 + 저변동성 혜택 가능."
-    elif not bullish_sentiment and bearish_sentiment and not high_iv and is_significant_positive_skew:
-        strategy = "⚠️ 매우 강한 매도 신호: 현물 매도 추천 및 숏 포지션 매수 추천"
-    elif bullish_sentiment and not high_iv and is_significant_negative_skew:
-        strategy = "🚀 매수 신호: 주식 매수 또는 레버리지 매수 + 저변동성 혜택 가능."
-    elif bullish_sentiment and high_iv and is_significant_negative_skew:
-        strategy = "📈 조심스러운 매수 신호: 현물 및 롱 포지션 매수 추천하지만 변동성 주의."
-    elif not bullish_sentiment and high_iv and is_significant_positive_skew:
-        strategy = "📉 조심스러운 매도 신호: 현물 매도 또는 숏 포지션 고려 (변동성 ↑ + 하락 대비 심리)"
-    elif not bullish_sentiment and not high_iv and is_significant_positive_skew:
-        strategy = "⚠️ 일반 매도 신호: 시장 약세 가능성 → 현물 매도/방어적 포지션 검토"
+    volume_score = min((total_call_volume + total_put_volume) / 100000, 1.0)
+    oi_score = min((call_df["Open Interest"].sum() + put_df["Open Interest"].sum()) / 200000, 1.0)
+
+    call_atm_mask = call_df["Strike"].between(current_price - 5, current_price + 5)
+    put_atm_mask = put_df["Strike"].between(current_price - 5, current_price + 5)
+    atm_volume = call_df[call_atm_mask]["Volume"].sum() + put_df[put_atm_mask]["Volume"].sum()
+    atm_concentration = atm_volume / (total_call_volume + total_put_volume + 1e-6)
+    atm_score = min(atm_concentration * 2, 1.0)
+
+    if 5 <= days_to_expiry <= 30:
+        time_score = 1.0
+    elif days_to_expiry <= 60:
+        time_score = 0.7
+    else:
+        time_score = 0.3
+
+    reliability_index = round((
+        volume_score * 0.3 +
+        oi_score * 0.3 +
+        atm_score * 0.2 +
+        time_score * 0.2
+    ), 2)
+
+    if reliability_index >= 0.8:
+        reliability_msg = "거래량과 포지션이 풍부하며, 만기일도 적절합니다. → 매우 신뢰할 수 있습니다."
+    elif reliability_index >= 0.6:
+        reliability_msg = "보통 수준의 신뢰도입니다. 시장 심리 해석은 가능하지만 다소 주의가 필요합니다."
+    else:
+        reliability_msg = "데이터 신뢰도가 낮습니다. 해당 만기일은 참고 수준으로만 해석하세요."
+
+
+    # 1. 매우 강한 매수 조건
+    if bullish_sentiment:
+        if not high_iv and is_significant_negative_skew:
+            strategy = "🚀 매우 강한 매수 신호: 주식 매수 또는 레버리지 매수 + 저변동성 혜택 가능."
+        elif high_iv and is_significant_negative_skew:
+            strategy = "📈 조심스러운 매수 신호: 상승 기대는 있으나 변동성 리스크 존재."
+        elif not high_iv and is_significant_negative_skew:
+            strategy = "📈 조심스러운 매수 신호: 상승 기대는 있으나 확실치 않음."
+        elif not high_iv and not is_significant_negative_skew:
+            strategy = "📈 조심스러운 매수 신호: 상승 기대는 있으나 확실치 않음."
+        elif not high_iv:
+            strategy = "🚀 매수 신호: 주식 매수 또는 콜 옵션 매수 유효."
+
+    # 2. 매우 강한 매도 조건
+    elif not bullish_sentiment and bearish_sentiment:
+        if not high_iv and is_significant_positive_skew:
+            strategy = "⚠️ 매우 강한 매도 신호: 현물 매도 및 숏 포지션 유리 + 변동성 낮음."
+        elif high_iv and is_significant_positive_skew:
+            strategy = "📉 조심스러운 매도 신호: 하락 대비 심리 강화 + 변동성 주의."
+        elif not high_iv and is_significant_positive_skew:
+            strategy = "📉 조심스러운 매도 신호: 하락 대비 심리 강화이나 확실치 않음."
+        elif high_iv and not is_significant_positive_skew:
+            strategy = "📉 조심스러운 매도 신호: 하락 대비 심리 강화이나 확실치 않음."
+        elif not high_iv:
+            strategy = "⚠️ 일반 매도 신호: 방향은 약세지만 리스크는 낮음."
 
     report_text = f"""
     📌 {ticker} 옵션 데이터 분석 보고서
@@ -176,15 +232,22 @@ def parse_options_data(call_df, put_df, ticker):
     📊 시장 심리 분석
     - 🔄 Put/Call Ratio: {put_call_ratio:.2f}
     - 🔄 IV Skew (Put - Call): {iv_skew:.2f}%
-    - 📌 실시간 변동성: {mean_vix:.1f}%
+    - 📌 실시간 변동성: {mean_iv:.1f}%
+
+    📈 신뢰도 분석
+    - 🧮 신뢰도 지수: {reliability_index} / 1.00
+    - 📘 해석: {reliability_msg}
+
     """.strip()
+    if put_box_min and call_box_max:
+        report_text += f"\n\n📦 시장 참여자 예상 박스권: ${put_box_min:.1f} ~ ${call_box_max:.1f}"
 
     return report_text
 
 def show_report_window(report):
     top = tk.Toplevel()
     top.title("옵션 데이터 분석 결과")
-    top.geometry("700x500")
+    top.geometry("700x650")
 
     text = tk.Text(top, wrap="word", font=("Segoe UI Emoji", 12))
     text.insert("1.0", report)
