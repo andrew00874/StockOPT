@@ -136,23 +136,34 @@ def parse_options_data(call_df, put_df, ticker):
     filtered_call_max = min(filtered_call_max, most_traded_call_strike)
 
     # ✅ 기본 `strategy` 값 설정 (모든 경우 대비)
+    
     strategy = "🔍 중립: 시장 방향성이 뚜렷하지 않음."
 
-    if bullish_sentiment and not high_iv and iv_skew < 0:
+    # 의미 있는 skew 임계값 설정
+    skew_threshold = 2.0 #skew_threshold = 2.0: 2% 이상일 때만 skew를 의미 있는 심리로 간주
+    is_significant_positive_skew = iv_skew > skew_threshold
+    is_significant_negative_skew = iv_skew < -skew_threshold
+
+    # 우선순위: 강한 신호 → 약한 신호 → 중립
+    if bullish_sentiment and not bearish_sentiment and not high_iv and is_significant_negative_skew:
         strategy = "🚀 매우 강한 매수 신호: 주식 매수 또는 레버리지 매수 + 저변동성 혜택 가능."
-    elif bullish_sentiment and high_iv and iv_skew < 0:
-        strategy = "📈 조심스러운 매수 신호: 현물 및 롱 포지션 매수 추천하지만 변동성 주의."
-    elif not bullish_sentiment and high_iv and iv_skew > 0:
-        strategy = "📉 조심스러운 매도 신호: 현물 및 숏 포지션 매수 추천하지만 변동성 주의"
-    elif not bullish_sentiment and bearish_sentiment and not high_iv and iv_skew > 0:
+    elif not bullish_sentiment and bearish_sentiment and not high_iv and is_significant_positive_skew:
         strategy = "⚠️ 매우 강한 매도 신호: 현물 매도 추천 및 숏 포지션 매수 추천"
+    elif bullish_sentiment and not high_iv and is_significant_negative_skew:
+        strategy = "🚀 매수 신호: 주식 매수 또는 레버리지 매수 + 저변동성 혜택 가능."
+    elif bullish_sentiment and high_iv and is_significant_negative_skew:
+        strategy = "📈 조심스러운 매수 신호: 현물 및 롱 포지션 매수 추천하지만 변동성 주의."
+    elif not bullish_sentiment and high_iv and is_significant_positive_skew:
+        strategy = "📉 조심스러운 매도 신호: 현물 매도 또는 숏 포지션 고려 (변동성 ↑ + 하락 대비 심리)"
+    elif not bullish_sentiment and not high_iv and is_significant_positive_skew:
+        strategy = "⚠️ 일반 매도 신호: 시장 약세 가능성 → 현물 매도/방어적 포지션 검토"
 
     # ✅ `report_text`가 항상 생성되도록 보장
     report_text = f"""
     📌 {ticker} 옵션 데이터 분석 보고서
 
     {strategy}
-
+    {bullish_sentiment} {bearish_sentiment} {high_iv} {iv_skew}
     📅 기준 옵션 만기일: {expiry_date}
     💰 현재 주가: ${current_price}
 
@@ -173,6 +184,17 @@ def parse_options_data(call_df, put_df, ticker):
     return report_text
 
 
+# ✅ 결과를 별도 창으로 보여주는 함수
+def show_report_window(report):
+    top = tk.Toplevel()
+    top.title("옵션 데이터 분석 결과")
+    top.geometry("700x500")  # 크기 조정 가능
+
+    text = tk.Text(top, wrap="word", font=("Segoe UI Emoji", 12))
+    text.insert("1.0", report)
+    text.config(state="disabled")  # 편집 금지
+    text.pack(expand=True, fill="both", padx=10, pady=10)
+
 # ✅ GUI 함수
 def show_report():
     ticker = ticker_entry.get().upper()
@@ -188,20 +210,20 @@ def show_report():
     call_df, put_df, ticker = df_ticker
     report = parse_options_data(call_df, put_df, ticker)
     
-    messagebox.showinfo("옵션 데이터 분석 결과", report)
+    show_report_window(report)  # ✅ 별도 창으로 결과 출력
 
 # ✅ Tkinter GUI 설정
 root = tk.Tk()
 root.title("옵션 데이터 분석기")
 root.geometry("500x250")
 
-label = tk.Label(root, text="티커명을 입력하세요:", font=("Arial", 12))
+label = tk.Label(root, text="티커명을 입력하세요:", font=("Arial", 14))
 label.pack(pady=10)
 
-ticker_entry = tk.Entry(root, font=("Arial", 14))
+ticker_entry = tk.Entry(root, font=("Arial", 16))
 ticker_entry.pack(pady=5)
 
-analyze_button = tk.Button(root, text="분석 시작", command=show_report, font=("Arial", 12))
+analyze_button = tk.Button(root, text="분석 시작", command=show_report, font=("Arial", 14))
 analyze_button.pack(pady=10)
 
 root.mainloop()
