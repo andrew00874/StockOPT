@@ -163,7 +163,6 @@ def parse_options_data(call_df, put_df, ticker):
     📌 {ticker} 옵션 데이터 분석 보고서
 
     {strategy}
-    {bullish_sentiment} {bearish_sentiment} {high_iv} {iv_skew}
     📅 기준 옵션 만기일: {expiry_date}
     💰 현재 주가: ${current_price}
 
