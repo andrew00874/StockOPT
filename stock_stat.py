@@ -147,7 +147,6 @@ def parse_options_data(call_df, put_df, ticker):
     call_box_max = get_box_range_weighted(call_df, current_price, strike_distance_limit=0.3)
 
 
-    strategy = "🔍 중립: 시장 방향성이 뚜렷하지 않음."
     skew_threshold = 2.0
     is_significant_positive_skew = iv_skew > skew_threshold
     is_significant_negative_skew = iv_skew < -skew_threshold
@@ -188,6 +187,7 @@ def parse_options_data(call_df, put_df, ticker):
         reliability_msg = "데이터 신뢰도가 낮습니다. 해당 만기일은 참고 수준으로만 해석하세요."
 
 
+    strategy = "🔍 중립: 시장 방향성이 뚜렷하지 않음."
     # 1. 매우 강한 매수 조건
     if bullish_sentiment:
         if not high_iv and is_significant_negative_skew:
@@ -213,6 +213,13 @@ def parse_options_data(call_df, put_df, ticker):
             strategy = "📉 조심스러운 매도 신호: 하락 대비 심리 강화이나 확실치 않음."
         elif not high_iv:
             strategy = "⚠️ 일반 매도 신호: 방향은 약세지만 리스크는 낮음."
+    # 3. 둘다 아닐경우
+    elif not bullish_sentiment and not bearish_sentiment:
+        if put_call_ratio > 1.2 and high_iv:
+            strategy = "🧐 하락 대비 강화 중 (공포 심리 징후)"
+        elif put_call_ratio < 0.8 and not high_iv:
+            strategy = "👀 조심스러운 상승 기대감 (거래 약하지만 방향성 존재)"
+
 
     report_text = f"""
     📌 {ticker} 옵션 데이터 분석 보고서
