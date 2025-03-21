@@ -1,132 +1,149 @@
-# Stock Option Analysis 📈
 
-이 프로젝트는 Yahoo Finance의 옵션 데이터를 크롤링하여 **콜 옵션(Call Option)과 풋 옵션(Put Option) 데이터를 분석**하고,
-**현재 주가를 기반으로 매수/매도 추천 전략을 제공하는 Python 스크립트**입니다.
+# 📈 Stock Option Analysis - 옵션 데이터 분석기
 
-## 📌 주요 기능
-- **Yahoo Finance에서 옵션 데이터 가져오기**
-- **현재 주가(Yahoo Finance API 사용) 가져오기**
-- **Put/Call Ratio, Implied Volatility 분석**
-- **시장 심리를 고려한 매매 추천 제공**
+이 프로젝트는 Yahoo Finance에서 **실시간 옵션 데이터를 수집하고 분석**하여,  
+**시장 참여자들의 심리(Put/Call Ratio, IV Skew, Open Interest 등)**를 정량적으로 해석하고,  
+**매수/매도 전략을 추천하는 Python 기반 GUI 애플리케이션**입니다.
 
 ---
 
-## 🚀 설치 방법
+## 🧩 주요 기능
+
+- ✅ 콜/풋 옵션 데이터 수집 (Yahoo Finance 크롤링)
+- ✅ 현재 주가 실시간 조회 (`yfinance`)
+- ✅ 시장 심리 지표 계산:
+  - Put/Call Ratio
+  - IV Skew
+  - 평균 Implied Volatility
+  - 거래량/미결제약정 분석
+- ✅ Tkinter 기반 GUI
+- ✅ 전략 메시지 자동 생성 및 박스권 범위 추정
+
+---
+
+## 🖥 실행 방법
 
 ### 1️⃣ 필수 패키지 설치
-아래 명령어를 실행하여 프로젝트에서 필요한 모든 패키지를 한 번에 설치할 수 있습니다.
 
-```sh
+```bash
 pip install -r requirements.txt
 ```
 
-### 2️⃣ 실행 방법
-```sh
-python stock_stat.py [TICKER]
+`requirements.txt`에는 다음과 같은 패키지가 포함됩니다:
 ```
-✅ 예제:
-```sh
-python stock_stat.py AAPL  # 애플 옵션 데이터 분석
-python stock_stat.py TSLA  # 테슬라 옵션 데이터 분석
+pandas
+requests
+yfinance
+tkinter  # Windows에서는 기본 포함됨
 ```
+
+### 2️⃣ 실행
+
+```bash
+python stock_stat.py
+```
+
+실행 후 GUI 창이 열리며, 티커(예: AAPL, TSLA 등)를 입력하면 리포트를 생성합니다.
 
 ---
 
 ## 📦 프로젝트 구조
+
 ```
 /stock_stat_project
-│── stock_stat.py       # 메인 실행 파일
-│── requirements.txt    # 필요한 패키지 목록
-│── README.md           # 프로젝트 설명 문서
+│
+├── stock_stat.py        # 메인 GUI 및 분석 코드
+├── requirements.txt     # 필요한 패키지 목록
+└── README.md            # 이 문서
 ```
 
 ---
 
-## 🔧 코드 설명
+## 🔧 코드 설명 (최신 기준)
 
-### **📌 옵션 데이터 크롤링**
-`fetch_options_data(ticker)` 함수는 **Yahoo Finance에서 옵션 데이터를 가져옵니다.**
+### 📌 옵션 데이터 크롤링
+
 ```python
 def fetch_options_data(ticker):
     url = f"https://finance.yahoo.com/quote/{ticker}/options/"
     response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
     tables = pd.read_html(StringIO(response.text))
-    return tables[0], tables[1], ticker  # Call Options, Put Options 반환
+    return tables[0], tables[1], ticker  # Call / Put
 ```
 
-### **📌 현재 주가 가져오기 (`yfinance` 활용)**
-`get_current_price(ticker)` 함수는 **Yahoo Finance API를 사용하여 현재 주가를 가져옵니다.**
-```python
-import yfinance as yf
+### 📌 현재 주가 조회
 
+```python
 def get_current_price(ticker):
     stock = yf.Ticker(ticker)
     price = stock.history(period="1d")["Close"].iloc[-1]
     return round(price, 2)
 ```
 
-### **📌 옵션 데이터 분석 및 매매 추천**
-- **Put/Call Ratio 계산**
-- **Implied Volatility를 고려한 시장 심리 분석**
-- **현재 주가를 기반으로 예상 Target Price 도출**
-- **매수/매도 전략 추천**
+### 📌 핵심 심리 지표 분석
+
+- Put/Call 거래량 비율
+- ATM 기준 IV Skew (풋 IV - 콜 IV)
+- 전체 콜 옵션 평균 IV
+- 거래량 + OI 기반 박스권 추정
+
+### 📌 전략 판단 로직
+
 ```python
-if bullish_sentiment and not high_iv:
-    strategy = "🚀 강한 매수 신호: 롱 포지션 추천."
-elif bullish_sentiment and high_iv:
-    strategy = "⚠️ 조심스러운 매수: 변동성 주의."
-elif not bullish_sentiment and high_iv:
-    strategy = "📉 매도 신호: 현물 매도 또는 숏 포지션 고려."
-else:
-    strategy = "🔍 중립: 관망 추천."
+if bullish_sentiment and not high_iv and iv_skew < 0:
+    strategy = "🚀 매우 강한 매수 신호..."
+elif bearish_sentiment and high_iv and iv_skew > 0:
+    strategy = "⚠️ 시장 하락 대비 강함..."
+...
+```
+
+### 📌 GUI (Tkinter)
+
+```python
+root = tk.Tk()
+ticker_entry = tk.Entry(root)
+...
+analyze_button = tk.Button(root, text="분석 시작", command=show_report)
 ```
 
 ---
 
-## 📊 실행 결과 예시
-```sh
-python stock_stat.py AAPL
+## 📊 실행 결과 예시 (GUI 창)
+
 ```
+📌 AAPL 옵션 데이터 분석 보고서
 
-```md
-📌 AAPL 옵션 데이터 기반 매매 추천 보고서
+🚀 매우 강한 매수 신호: 주식 매수 또는 콜 옵션 매수 + 저변동성 혜택 가능.
 
-🚀 강한 매수 신호: 롱 포지션 추천.
-📊 Put/Call Ratio: 0.82
-📅 예상 만기일: 2025-03-14
-🎯 예상 Target Price: $183.42
+📅 옵션 만기일: 2025-03-14
 💰 현재 주가: $175.25
+
+🔥 거래량 TOP 옵션 (거래량 + OI 추가)
+- 📈 콜 옵션 행사가: $180 (거래량: 15,320, OI: 92,000)
+- 📉 풋 옵션 행사가: $170 (거래량: 12,100, OI: 88,400)
+
+📊 시장 심리 분석
+- 🔄 Put/Call Ratio: 0.79
+- 🔄 IV Skew (Put - Call): 3.21%
+- 📌 실시간 변동성: 24.3%
 ```
 
 ---
 
-## ❓ FAQ
+## 📘 지표 해석 가이드
 
-### **1. 특정 티커(AAPL, TSLA 등)의 현재 주가가 나오지 않는 경우?**
-✅ `yfinance`가 정상적으로 설치되지 않았을 가능성이 있습니다.
-아래 명령어를 실행하세요:
-```sh
-pip install --upgrade yfinance
-```
-
-### **2. 옵션 데이터가 크롤링되지 않는 경우?**
-✅ Yahoo Finance 웹사이트 구조가 변경되었을 수 있습니다.
-✅ `fetch_options_data(ticker)` 함수에서 **User-Agent를 추가하여 요청**하세요.
+각 지표별 해석은 [`옵션 심리 분석 리포트 - 지표 해석 가이드`](#📈-옵션-심리-분석-리포트---지표-해석-가이드) 섹션을 참고하세요.
 
 ---
 
-## 📌 라이선스
-이 프로젝트는 **MIT 라이선스** 하에 배포됩니다.
+## 🧠 기여 & 문의
 
-```
-MIT License
+- PR, 이슈 환영합니다.
+- 기능 개선, 추가 지표 요청은 [Issues] 탭에 자유롭게 남겨주세요.
+
+---
+
+## 📄 라이선스
+
+MIT License  
 Copyright (c) 2024
-```
-
----
-
-## 💡 기여 방법
-- **버그 수정**이나 **기능 개선 아이디어**가 있다면 Pull Request를 보내주세요!
-- 문의사항은 Issues에 등록해 주세요.
-
----
