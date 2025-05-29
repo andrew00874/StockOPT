@@ -1,40 +1,36 @@
 
 # 📈 Stock Option Analysis - 옵션 데이터 분석기
 
-이 프로젝트는 Yahoo Finance에서 **실시간 옵션 데이터를 수집하고 분석**하여,  
-**시장 참여자들의 심리(Put/Call Ratio, IV Skew, Open Interest 등)**를 정량적으로 해석하고,  
-**매수/매도 전략을 추천하는 Python 기반 GUI 애플리케이션**입니다.
+Yahoo Finance에서 실시간 옵션 데이터를 수집하여  
+**시장 참여자 심리 (Put/Call 비율, IV Skew, 거래량/OI 집중 등)**을 정량적으로 분석하고,  
+AI 수준의 **전략 추천 메시지**를 제공하는 Python 기반 GUI 애플리케이션입니다.
 
 ---
 
 ## 🧩 주요 기능
 
-- ✅ 콜/풋 옵션 데이터 수집 (Yahoo Finance 크롤링)
-- ✅ 현재 주가 실시간 조회 (`yfinance`)
-- ✅ 시장 심리 지표 계산:
-  - Put/Call Ratio
-  - IV Skew
-  - 평균 Implied Volatility
-  - 거래량/미결제약정 분석
-- ✅ Tkinter 기반 GUI
-- ✅ 전략 메시지 자동 생성 및 박스권 범위 추정
+- ✅ 콜/풋 옵션 체인 자동 수집 (`requests`, `pandas.read_html`)
+- ✅ 옵션 만기일 자동 탐지 (재시도 로직 포함)
+- ✅ 심리 분석 지표 계산:
+  - Put/Call Volume Ratio
+  - IV Skew (ATM 기준)
+  - 평균 IV 및 스프레드
+  - Open Interest 및 거래량 집중도
+  - ATM 옵션 집중도 분석
+- ✅ 전략 추천 엔진 (다단계 조건 기반)
+- ✅ 신뢰도 지수 계산 (Volume, OI, ATM 비중, 만기일 기준)
+- ✅ 시장 박스권 예측 (OI 누적 + 가중치 기반)
+- ✅ Tkinter GUI 인터페이스
+- ✅ 비동기 처리로 GUI 멈춤 없이 실행
 
 ---
 
 ## 🖥 실행 방법
 
-### 1️⃣ 필수 패키지 설치
+### 1️⃣ 패키지 설치
 
 ```bash
 pip install -r requirements.txt
-```
-
-`requirements.txt`에는 다음과 같은 패키지가 포함됩니다:
-```
-pandas
-requests
-yfinance
-tkinter  # Windows에서는 기본 포함됨
 ```
 
 ### 2️⃣ 실행
@@ -43,199 +39,116 @@ tkinter  # Windows에서는 기본 포함됨
 python stock_stat.py
 ```
 
-실행 후 GUI 창이 열리며, 티커(예: AAPL, TSLA 등)를 입력하면 리포트를 생성합니다.
+GUI 창에서 티커(AAPL, TSLA 등)를 입력하고 만기일을 선택하면  
+자동으로 분석 보고서가 생성됩니다.
 
 ---
 
-## 📦 프로젝트 구조
+## 🔧 기술 설명
 
-```
-/stock_stat_project
-│
-├── stock_stat.py        # 메인 GUI 및 분석 코드
-├── requirements.txt     # 필요한 패키지 목록
-└── README.md            # 이 문서
-```
-
----
-
-## 🔧 코드 설명 (최신 기준)
-
-### 📌 옵션 데이터 크롤링
+### ▶ 만기일 가져오기 (`yfinance`) 개선
 
 ```python
-def fetch_options_data(ticker):
-    url = f"https://finance.yahoo.com/quote/{ticker}/options/"
-    response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-    tables = pd.read_html(StringIO(response.text))
-    return tables[0], tables[1], ticker  # Call / Put
+@lru_cache
+def get_expiry_dates(ticker):
+    for attempt in range(3):
+        try:
+            return yf.Ticker(ticker).options
+        except Exception:
+            time.sleep(2)
 ```
 
-### 📌 현재 주가 조회
+- 재시도 및 시간 딜레이 포함
+- 빈 리스트 반환 시 에러 메시지 출력
+
+### ▶ 옵션 데이터 수집 (`requests` + `read_html`)
 
 ```python
-def get_current_price(ticker):
-    stock = yf.Ticker(ticker)
-    price = stock.history(period="1d")["Close"].iloc[-1]
-    return round(price, 2)
+def fetch_options_data(ticker, expiry_timestamp):
+    url = f"https://finance.yahoo.com/quote/{ticker}/options?date={expiry_timestamp}"
+    tables = pd.read_html(StringIO(requests.get(url).text))
+    return tables[0], tables[1]
 ```
 
-### 📌 핵심 심리 지표 분석
+### ▶ 심리 지표 계산 및 전략 판단
 
-- Put/Call 거래량 비율
-- ATM 기준 IV Skew (풋 IV - 콜 IV)
-- 전체 콜 옵션 평균 IV
-- 거래량 + OI 기반 박스권 추정
+- Put/Call 비율
+- IV Skew 및 평균 IV
+- ATM 기준 집중도
+- 가장 많이 거래된 행사가 분석
+- 박스권(가중치 기반) 및 Open Interest 누적범위 추정
+- 전략 조건 예:
+  ```python
+  if bullish_sentiment and not high_iv and iv_skew < -2:
+      strategy = "🚀 매우 강한 매수 신호"
+  ```
 
-### 📌 전략 판단 로직
+### ▶ 신뢰도 지수 계산 로직
 
 ```python
-if bullish_sentiment and not high_iv and iv_skew < 0:
-    strategy = "🚀 매우 강한 매수 신호..."
-elif bearish_sentiment and high_iv and iv_skew > 0:
-    strategy = "⚠️ 시장 하락 대비 강함..."
-...
+reliability_index = (
+    volume_score * 0.3 +
+    oi_score * 0.3 +
+    atm_score * 0.2 +
+    time_score * 0.2
+)
 ```
 
-### 📌 GUI (Tkinter)
-
-```python
-root = tk.Tk()
-ticker_entry = tk.Entry(root)
-...
-analyze_button = tk.Button(root, text="분석 시작", command=show_report)
-```
+- Volume, OI, ATM 집중도, 만기일 등 4가지 축 종합 평가
 
 ---
 
-## 📊 실행 결과 예시 (GUI 창)
+## 📊 GUI 예시
 
 ```
-📌 AAPL 옵션 데이터 분석 보고서
+📌 TSLA 옵션 분석 보고서
 
-🚀 매우 강한 매수 신호: 주식 매수 또는 콜 옵션 매수 + 저변동성 혜택 가능.
+📈 전략: 📉 조심스러운 매도 신호 (IV 높고 풋 우세)
+📅 만기일: 2025-06-21
+💰 현재가: $175.30
 
-📅 옵션 만기일: 2025-03-14
-💰 현재 주가: $175.25
+🔥 가장 활발한 옵션
+- 콜: $180 (거래량: 12,300 / OI: 95,000)
+- 풋: $170 (거래량: 14,400 / OI: 102,500)
 
-🔥 거래량 TOP 옵션 (거래량 + OI 추가)
-- 📈 콜 옵션 행사가: $180 (거래량: 15,320, OI: 92,000)
-- 📉 풋 옵션 행사가: $170 (거래량: 12,100, OI: 88,400)
+🔍 Put/Call Ratio: 1.31
+🔍 IV Skew: +6.2%
+📈 평균 IV: 31.4%
 
-📊 시장 심리 분석
-- 🔄 Put/Call Ratio: 0.79
-- 🔄 IV Skew (Put - Call): 3.21%
-- 📌 실시간 변동성: 24.3%
+📦 예상 박스권: $168.0 ~ $182.5
+🧮 신뢰도 지수: 0.84 → 매우 신뢰할 수 있음
 ```
 
 ---
 
-## 📘 지표 해석 가이드
-
-# 📈 옵션 심리 분석 리포트 - 지표 해석 가이드
-
-이 분석기는 Yahoo Finance의 실시간 옵션 데이터를 기반으로 시장 참여자들의 심리를 다양한 지표로 분석합니다.  
-아래는 리포트에 나오는 주요 지표들의 의미와 해석 방법을 정리한 내용입니다.
-
----
-
-## 🔄 Put/Call Ratio
-
-- **정의:** 풋 옵션 거래량 ÷ 콜 옵션 거래량  
-- **시장 심리 해석:**
-
-| 비율(Put/Call) | 해석 |
-|----------------|------|
-| **< 0.7**      | 투자자들이 상승에 더 베팅하고 있음 (강한 매수 심리) |
-| **0.7 ~ 1.0**  | 중립 또는 약한 상승 기대감 |
-| **> 1.0**      | 하락에 대한 대비 심리, 약세 경계 (풋 거래 비중 ↑) |
-| **> 1.3**      | 강한 하락 우려 또는 공포 심리 반영 |
-
-> 🔍 **낮을수록** 투자자들은 시장 상승을 기대하고, **높을수록** 하락 대비에 집중합니다.
-
----
-
-## 🔄 IV Skew (Implied Volatility Skew)
-
-- **정의:** ATM(등가격) 기준 풋 옵션 IV - 콜 옵션 IV  
-- **시장 심리 해석:**
-
-| IV Skew 값 | 해석 |
-|------------|------|
-| **> 0**    | 풋 옵션 IV가 높음 → 하락 대비 수요 증가 (하락 리스크 우려) |
-| **< 0**    | 콜 옵션 IV가 높음 → 상승 기대감 존재 |
-| **= 0**    | 대칭적 → 상승/하락에 대해 중립적 기대 |
-
-> 예: `+5%` → 풋 쪽에 더 높은 보험 수요 있음 → 하락 방어 심리  
-> 예: `-3%` → 콜 쪽이 더 비쌈 → 상승 기대감 반영
-
----
-
-## 📌 실시간 변동성 (IV 평균)
-
-- **정의:** 전체 콜 옵션들의 평균 암묵적 변동성 (Implied Volatility)
-- **해석:**
-
-| 평균 IV (%) | 시장 상태 |
-|-------------|-----------|
-| **< 20%**   | 안정된 시장 (변동성 낮음) |
-| **20 ~ 35%**| 보통 수준의 기대 변동성 |
-| **> 35%**   | 높은 변동성 기대 (이벤트/뉴스 가능성) |
-| **> 50%**   | 극단적 공포 또는 급등/급락 가능성 내포 |
-
-> IV가 높을수록 프리미엄이 비싸지며 옵션 매수자는 신중해야 합니다.
-
----
-
-## 🔥 거래량 + OI (Open Interest)
-
-- **Volume:** 특정 옵션이 당일 얼마나 활발히 거래되었는가를 나타냄  
-- **Open Interest:** 해당 옵션에 여전히 열려있는 계약 수 → 누적 포지션
-
-### 심리 해석:
-
-- **거래량이 많고 OI도 많다:** 신규 진입 + 강한 관심도 → 시장의 핵심 포인트
-- **거래량은 많지만 OI는 낮다:** 단기 매매 중심 (단타 세력)
-- **OI만 높고 거래량은 적다:** 장기 보유 포지션 / 과거 포지션 유지 중
-
----
-
-## 🧭 박스권 해석 (조정된 박스권)
-
-이 박스권은 상위 85% OI 구간 + 가장 활발한 거래 행사가 기준으로 계산됩니다.
-
-- **하단 = 주요 지지선 (Put 수요가 집중된 가격대)**
-- **상단 = 주요 저항선 (Call 수요가 집중된 가격대)**
-
-해당 구간에 있을수록 시장은 **그 범위 내에서 움직일 가능성이 높다**고 참여자들이 판단하고 있음을 뜻합니다.
-
----
-
-## 📌 요약
+## 📌 리포트 해석 가이드 요약
 
 | 지표 | 낮을 때 의미 | 높을 때 의미 |
 |------|--------------|--------------|
-| Put/Call Ratio | 낙관 (상승 심리) | 비관 (하락 대비) |
-| IV Skew | 상승 기대 | 하락 우려 |
-| 평균 IV | 안정 | 불안정/변동성 ↑ |
-| OI | 관심 적음 | 시장 집중 구간 |
+| Put/Call Ratio | 상승 기대감 | 하락 대비 심리 |
+| IV Skew | 상승 기대 (콜 우세) | 하락 우려 (풋 우세) |
+| 평균 IV | 안정 시장 | 높은 기대 변동성 |
+| 신뢰도 지수 | 참고용 | 고신뢰 해석 가능 |
 
 ---
 
-🧠 이 가이드를 참고하여 리포트 데이터를 더 정확하게 해석하고  
-당일 시장 흐름과 참여자 심리를 빠르게 파악해보세요!
+## 🔁 향후 추가 예정 기능
 
+- 옵션 체인 변화량 트래킹 (일자별 비교)
+- 델타 기반 ITM/OTM 집중 분석
+- 머신러닝 예측모델 연동
+- 전략 추천 히스토리 저장 (CSV/DB)
 
 ---
 
 ## 🧠 기여 & 문의
 
-- PR, 이슈 환영합니다.
-- 기능 개선, 추가 지표 요청은 [Issues] 탭에 자유롭게 남겨주세요.
+기능 개선, 버그 제보, 전략 로직 제안은 언제든지 환영합니다.  
+Issues 또는 PR을 통해 자유롭게 참여해주세요.
 
 ---
 
 ## 📄 라이선스
 
 MIT License  
-Copyright (c) 2024
+© 2025 Jaemin
