@@ -9,6 +9,7 @@ import datetime
 import calendar
 from functools import lru_cache
 import threading
+import time
 
 # 캐싱을 통한 성능 최적화 - 동일한 티커에 대한 반복 요청 방지
 @lru_cache(maxsize=32)
@@ -55,12 +56,31 @@ def fetch_options_data(ticker, expiry_timestamp=None):
 # 캐싱을 통한 성능 최적화
 @lru_cache(maxsize=32)
 def get_expiry_dates(ticker):
-    try:
-        stock = yf.Ticker(ticker)
-        return stock.options or []  # None 대신 빈 리스트 반환
-    except Exception as e:
-        print(f"만기일 가져오기 오류: {e}")
-        return []
+    """옵션 만기일 목록을 가져옵니다."""
+    max_retries = 3
+    retry_delay = 2  # 초 단위
+    
+    for attempt in range(max_retries):
+        try:
+            stock = yf.Ticker(ticker)
+            options = stock.options
+            
+            if not options:
+                print(f"{ticker}의 옵션 데이터가 없습니다.")
+                return []
+                
+            return sorted(options)  # 날짜순으로 정렬
+            
+        except Exception as e:
+            if "Too Many Requests" in str(e) and attempt < max_retries - 1:
+                print(f"API 요청 제한에 도달했습니다. {retry_delay}초 후 재시도합니다... (시도 {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # 대기 시간을 2배로 증가
+                continue
+            print(f"만기일 가져오기 오류: {e}")
+            return []
+    
+    return []
 
 def extract_expiry_date(contract_name):
     match = re.search(r"(\d{6})", contract_name)
@@ -363,10 +383,12 @@ def update_expiry_dates():
         if date_list:
             expiry_combo['values'] = date_list
             expiry_combo.set(date_list[0])
+            loading_label.config(text=f"{len(date_list)}개의 만기일을 찾았습니다.")
         else:
             expiry_combo.set("만기일 없음")
-        loading_label.pack_forget()
-        
+            loading_label.config(text="만기일을 찾을 수 없습니다.")
+        loading_label.pack(pady=5)
+    
     # 별도 스레드로 데이터 가져오기
     threading.Thread(target=fetch_dates, daemon=True).start()
 

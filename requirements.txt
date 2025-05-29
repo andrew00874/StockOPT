@@ -3,3 +3,9 @@ requests
 beautifulsoup4
 lxml
 yfinance
+scikit-learn
+torch
+numpy
+matplotlib
+seaborn
+tqdm
